@@ -1,0 +1,15 @@
+---
+gl_url: ""
+gl_validate_certs: False
+gl_user: ""
+gl_secrets: True
+gl_create_grp: ""
+gl_grp_desc: ""
+gl_grp_path: ""
+gl_grp_visibility: "private"
+gl_prj_name: ""
+gl_grp_users: []
+gl_prj_grp_access: "30"
+
+#store these in an ansible vault within vars/gitlab-secrets.yml:
+#gl_token: ""

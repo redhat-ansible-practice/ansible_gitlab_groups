@@ -1,0 +1,134 @@
+---
+- name: Bring in vaulted Gitlab secrets
+  include_vars: vars/gitlab-secrets.yml
+  when: gl_secrets
+  no_log: True
+
+- name: Set gl_grp_path when not provided
+  set_fact:
+    gl_grp_path: "{{ gl_create_grp }}"
+  when: gl_grp_path == ""
+
+- name: Check if Gitlab Group exists
+  uri:
+    url: "{{ gl_url }}/api/v4/groups?private_token={{ gl_token }}&search={{ gl_create_grp }}"
+    method: "GET"
+    validate_certs: "{{ gl_validate_certs }}"
+    status_code: "200"
+  register: gl_grp_exists
+  until: gl_grp_exists.status == 200
+  retries: 5
+  delay: 5
+
+- name: Set Gitlab Group Search Result
+  set_fact:
+    gl_grp_result_names: "{{ gl_grp_exists | json_query('json[*].name') | list }}"
+  when: gl_grp_exists.json | length > 0
+
+- name: Set Gitlab Group Search Result | No Results
+  set_fact:
+    gl_grp_result_names: ["no_results"]
+  when: gl_grp_exists.json | length < 1
+
+- name: Create Gitlab Group
+  uri:
+    url: "{{ gl_url }}/api/v4/groups?private_token={{ gl_token }}"
+    body_format: "raw"
+    method: "POST"
+    validate_certs: "{{ gl_validate_certs }}"
+    body: "name={{ gl_create_grp }}&path={{ gl_grp_path}}&description={{ gl_grp_desc }}&visibility={{ gl_grp_visibility }}"
+    status_code: "201"
+  register: create_group
+  until: create_group.status == 201
+  retries: 5
+  delay: 5
+  changed_when: "create_group.status == 201"
+  when: (gl_create_grp not in gl_grp_result_names) or
+        ("no_results" in gl_grp_result_names)
+
+# Get new group id
+- name: Get Gitlab Group
+  uri:
+    url: "{{ gl_url }}/api/v4/groups?private_token={{ gl_token }}&search={{ gl_create_grp }}"
+    method: "GET"
+    validate_certs: "{{ gl_validate_certs }}"
+    status_code: "200"
+  register: gl_grp_obj
+  until: gl_grp_obj.status == 200
+  retries: 5
+  delay: 5
+
+- name: Set Gitlab Group ID
+  set_fact:
+    gl_grp_id: "{{ item.id }}"
+    gl_grp_result_name: "{{ item.name }}"
+  when: gl_create_grp == item.name
+  with_items: "{{ gl_grp_obj.json }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# TODO: Map group to an AD Group
+
+# Include user group RBAC plays
+- name: Assign Users to new Gitlab Group
+  include_tasks: gitlab-group-users.yml
+  with_items: "{{ gl_grp_users }}"
+  loop_control:
+    loop_var: user
+    label: "{{ user.name }}"
+  when: (gl_grp_users | length > 0) or
+        (user.name != "")
+
+# Get project id
+- name: Check if Gitlab Project exists to Add Gitlab Group Access
+  uri:
+    url: "{{ gl_url }}/api/v4/projects?private_token={{ gl_token }}&search={{ gl_prj_name }}"
+    method: "GET"
+    validate_certs: "{{ gl_validate_certs }}"
+    status_code: "200"
+  register: gl_prj_exists
+  until: gl_prj_exists.status == 200
+  retries: 5
+  delay: 5
+
+
+- name: Set Gitlab Project to share with Gitlab Group Information
+  set_fact:
+    gl_prj_shared_list: "{{ item | json_query('shared_with_groups[*].group_id') | list }}"
+    gl_prj_id: "{{ item.id }}"
+  with_items: "{{ gl_prj_exists.json }}"
+  when:
+    - gl_prj_exists | length > 0
+    - gl_prj_name == item.name
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Project is already shared with the Gitlab Group
+  debug:
+    msg: "The Gitlab Project specified, {{ gl_prj_name }}, is already shared with the Gitlab Group {{ gl_create_grp }}"
+  when: gl_grp_id | int in gl_prj_shared_list
+
+
+# Assign Group to Project RBAC
+- name: Assign Gitlab Group access to Gitlab Project
+  uri:
+    url: "{{ gl_url }}/api/v4/projects/{{ gl_prj_id }}/share?private_token={{ gl_token }}"
+    body_format: "raw"
+    method: "POST"
+    validate_certs: "{{ gl_validate_certs }}"
+    body: "group_id={{ gl_grp_id }}&group_access={{ gl_prj_grp_access }}"
+    status_code: "201"
+  register: assign_group_access
+  until: assign_group_access.status == 201
+  retries: 5
+  delay: 5
+  changed_when: "assign_group_access == 201"
+  when:
+    # newly created group id not in the list of groups the project is already shared with
+    - gl_grp_id | int not in gl_prj_shared_list
+    # project name not null
+    - gl_prj_name != ""
+    # project's group access level not null
+    - gl_prj_grp_access != ""
+    # newly created group exists
+    - gl_create_grp == gl_grp_result_name

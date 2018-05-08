@@ -1,0 +1,72 @@
+---
+# Check if user exists and capture user id
+- name: Check if user {{ user.name }} is a Gitlab user
+  uri:
+    url: "{{ gl_url }}/api/v4/users?private_token={{ gl_token }}&search={{ user.name }}"
+    method: "GET"
+    validate_certs: "{{ gl_validate_certs }}"
+    status_code: "200"
+  register: gl_user_exists
+  until: gl_user_exists.status == 200
+  retries: 5
+  delay: 5
+
+- name: Set Gitlab User Search Results
+  set_fact:
+    gl_user_results: "{{ gl_user_exists | json_query('json[*].username') | list }}"
+  when: gl_user_exists | length > 0
+
+- name: Set Gitlab User Search Results | No Results
+  set_fact:
+    gl_user_results: ["no_results"]
+  when: gl_user_exists | length < 1
+
+- name: Set Gitlab User Info
+  set_fact:
+    gl_user_id: "{{ item.id }}"
+    gl_user_result_name: "{{ item.username }}"
+  with_items: "{{ gl_user_exists.json }}"
+  when:
+    - gl_user_exists | length > 0
+    - user.name == item.username
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Gitlab User does not exist
+  debug:
+    msg: "The user {{ user.name }} is not a valid Gitlab user, can't add them to the Group."
+  when: gl_user_exists.json | length < 1
+
+# Only assign user to group if they exist in Gitlab
+- name: Assign user {{ user.name }} to the Gitlab Group
+  block:
+    - name: Check if user {{ user.name }} is a member of the Gitlab Group
+      uri:
+        url: "{{ gl_url }}/api/v4/groups/{{ gl_grp_id }}/members/{{ gl_user_id }}?private_token={{ gl_token }}"
+        method: "GET"
+        validate_certs: "{{ gl_validate_certs }}"
+        status_code: "200,404"
+      register: gl_is_grp_member
+      until: (gl_is_grp_member.status == 200) or
+             (gl_is_grp_member.status == 404)
+      retries: 5
+      delay: 5
+
+    # Assign user to Gitlab Group
+    - name: Assigning {{ user.name }} to the Gitlab Group
+      uri:
+        url: "{{ gl_url }}/api/v4/groups/{{ gl_grp_id }}/members?private_token={{ gl_token }}"
+        method: "POST"
+        body_format: "raw"
+        validate_certs: "{{ gl_validate_certs }}"
+        body: "user_id={{ gl_user_id }}&access_level={{ user.access }}"
+        status_code: "201"
+      register: assign_user
+      until: assign_user.status == 201
+      retries: 5
+      delay: 5
+      changed_when: "assign_user == 201"
+      when: gl_is_grp_member.status == 404
+  when:
+    - gl_user_exists.json | length > 0
+    - user.name == gl_user_result_name

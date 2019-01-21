@@ -1,4 +1,4 @@
-# genie-gitlab-groups  
+# gitlab_groups  
 ## Description  
 An Ansible Role to create a Gitlab Group, assign a user to the group with a specified level of access, and optionally assign the new Group with share access on an existing Gitlab Project.
 ## Prerequisites

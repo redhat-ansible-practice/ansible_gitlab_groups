@@ -52,5 +52,8 @@ gl_grp_users:
           access: "30"
       no_log: True #Please do this to protect your API token
 ```
-## Author  
-[Andrew J. Huffman](mailto:ahuffman@redhat.com)
+## License
+[MIT](LICENSE)
+
+## Author
+[Andrew J. Huffman](https://github.com/ahuffman)

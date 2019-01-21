@@ -32,9 +32,9 @@ gl_grp_users:
 ### Standard Role Usage
 ```yaml
 ---
-- hosts: all
+- hosts: "all"
   roles:
-    - role: "genie-gitlab-groups"
+    - role: "gitlab_groups"
       gl_url: "https://mygitlab.org"
       gl_validate_certs: "false"
       gl_secrets: True
